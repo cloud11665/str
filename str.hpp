@@ -54,7 +54,7 @@ All StrXXX types derives from Str and instance hold the local buffer capacity. S
     void MyFunc(Str* s) { *s = "Hello"; }     // will use local buffer if available in Str instance
 
 Testing the code:
-    g++ -std=c++20 -g test.cpp -o test -lfmt
+    g++ -std=c++20 -g test.cxx -o test -lfmt
     valgrind ./test
 
 */
