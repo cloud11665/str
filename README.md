@@ -3,8 +3,8 @@
 https://github.com/cloud11665/str
 
 ### License:
-&nbsp;&nbsp;&nbsp;&nbsp;This software is in the public domain. Where that dedication is not
-&nbsp;&nbsp;&nbsp;&nbsp;recognized, you are granted a perpetual, irrevocable license to copy,
+&nbsp;&nbsp;&nbsp;&nbsp;This software is in the public domain. Where that dedication is not  
+&nbsp;&nbsp;&nbsp;&nbsp;recognized, you are granted a perpetual, irrevocable license to copy,  
 &nbsp;&nbsp;&nbsp;&nbsp;distribute, and modify this file as you see fit.
 
 ### Usage:
@@ -29,7 +29,6 @@ The main idea is that you can provide an arbitrary sized local buffer if you exp
 // Common sizes are defined at the bottom of Str.h, you may define your own.
 ```
 
-
 ## Functions:
 ```cpp
     Str256 s;
@@ -48,7 +47,7 @@ Constructor helper for reference/literal:
 
 All StrN types derives from Str and instance hold the local buffer capacity. So you can pass e.g. Str256* to a function taking base type Str* and it will be functional:
 ```cpp
-    void MyFunc(Str* s) { *s = "Hello"; }     // will use local buffer if available in Str instance
+    void MyFunc(Str* s) { *s = "Hello"; }    // will use local buffer if available in Str instance
 ```
 
 ## Testing the code:
