@@ -1,23 +1,18 @@
-// Str v0.32
-// Simple C++ string type with an optional local buffer, by Omar Cornut
-// https://github.com/ocornut/str
+//  Str v0.4
+//  Simple C++ string type with an optional local buffer, by Omar Cornut, cloud11665
+//  https://github.com/cloud11665/str
 
-// LICENSE
-//  This software is in the public domain. Where that dedication is not
-//  recognized, you are granted a perpetual, irrevocable license to copy,
-//  distribute, and modify this file as you see fit.
+//  LICENSE:
+//      This software is in the public domain. Where that dedication is not
+//      recognized, you are granted a perpetual, irrevocable license to copy,
+//      distribute, and modify this file as you see fit.
 
-// USAGE
-//  Include this file in whatever places need to refer to it.
-//  In ONE .cpp file, write '#define STR_IMPLEMENTATION' before the #include of this file.
-//  This expands out the actual implementation into that C/C++ file.
-
+//  USAGE:
+//      Include this file in whatever places need to refer to it.
 
 /*
 - This isn't a fully featured string class.
 - It is a simple, bearable replacement to std::string that isn't heap abusive nor bloated (can actually be debugged by humans).
-- String are mutable. We don't maintain size so length() is not-constant time.
-- Maximum string size currently limited to 2 MB (we allocate 21 bits to hold capacity).
 - Local buffer size is currently limited to 1023 bytes (we allocate 10 bits to hold local buffer size).
 - In "non-owned" mode for literals/reference we don't do any tracking/counting of references.
 - Overhead is 8-bytes in 32-bits, 16-bytes in 64-bits (12 + alignment).
@@ -50,11 +45,6 @@ Functions:
    s.appendf("hello %d", 42);               // append (w/format). cost a length() calculation!
    s.set_ref("Hey!");                       // set (literal/reference, just copy pointer, no tracking)
 
-Constructor helper for format string: add a trailing 'f' to the type. Underlying type is the same.
-
-   Str256f filename("%s/%s.tmp", folder, filename);             // construct (w/format)
-   fopen(Str256f("%s/%s.tmp, folder, filename).c_str(), "rb");  // construct (w/format), use as function param, destruct
-
 Constructor helper for reference/literal:
 
    StrRef ref("literal");                   // copy pointer, no allocation, no string copy
@@ -64,12 +54,14 @@ All StrXXX types derives from Str and instance hold the local buffer capacity. S
 
    void MyFunc(Str& s) { s = "Hello"; }     // will use local buffer if available in Str instance
 
-(Using a template e.g. Str<N> we could remove the m_local_size storage but it would make passing typed Str<> to functions tricky.
- Instead we don't use template so you can pass them around as the base type Str*. Also, templates are ugly.)
+Testing the code:
+    g++ -std=c++20 -g test.cxx -lfmt -fsanitize=address -fsanitize=leak
+    ./a.out
 */
 
 /*
  CHANGELOG
+  0.40 - Added libfmt support, reworked api.
   0.32 - added owned() accessor.
   0.31 - fixed various warnings.
   0.30 - turned into a single header file, removed Str.cpp.
@@ -84,8 +76,7 @@ All StrXXX types derives from Str and instance hold the local buffer capacity. S
   0.21 - added StrXXXf() constructor to construct directly from a format string.
 */
 
-#ifndef STR_INCLUDED
-#define STR_INCLUDED
+#pragma once
 
 //-------------------------------------------------------------------------
 // CONFIGURATION
@@ -111,7 +102,7 @@ All StrXXX types derives from Str and instance hold the local buffer capacity. S
 #endif
 
 #include <string.h>   // for strlen, strcmp, memcpy, etc.
-#include <fmt/format.h> // don't use varargs.
+#include <fmt/format.h>
 #include <string_view>
 #include <compare>
 
@@ -153,14 +144,16 @@ public:
     void                reserve_discard(int cap);
     void                shrink_to_fit();
 
-    inline char&        operator[](size_t i)                    { STR_ASSERT(-m_size < i && i < m_size); return m_data[i + (i < 0 ? m_size : 0)]; }
-    inline char         operator[](size_t i) const              { STR_ASSERT(-m_size < i && i < m_size); return m_data[i + (i < 0 ? m_size : 0)]; }
-    explicit operator   std::string_view() const                { return std::string_view{m_data, m_size}; } // Don't know if we should keep this.
+    inline char&        operator[](size_t i)                     { STR_ASSERT(-m_size < i && i < m_size); return m_data[i + (i < 0 ? m_size : 0)]; }
+    inline char         operator[](size_t i) const               { STR_ASSERT(-m_size < i && i < m_size); return m_data[i + (i < 0 ? m_size : 0)]; }
+    explicit operator   std::string_view() const                 { return std::string_view{m_data, m_size}; } // Don't know if we should keep this.
 
     inline Str();
-    inline Str(std::string_view s);
+    inline Str(std::string_view s)                               { m_local_size = 0; m_owned = 0; set(s); } // m_owned gets reset in call to set().
+    inline Str(const char* s)                                    { m_local_size = 0; m_owned = 0; set(s); }
     inline void         set(std::string_view src);
     inline Str&         operator=(std::string_view rhs)          { set(rhs); return *this; }
+    inline Str&         operator+=(std::string_view rhs)         { append(rhs); return *this; }
     inline bool         operator==(std::string_view rhs) const   { return view() == rhs; }
     inline auto         operator<=>(std::string_view rhs) const  { return view() <=> rhs; }
 
@@ -193,11 +186,19 @@ protected:
     }
 };
 
+Str::Str()
+{
+    m_data = EmptyBuffer;      // Shared READ-ONLY initial buffer for 0 capacity
+    m_capacity = 0;
+    m_local_size = 0;
+    m_size = 0;
+    m_owned = 0;
+}
+
 void    Str::set(std::string_view src)
 {
-    int buf_len = src.size();
-    if (m_capacity < buf_len)
-        reserve_discard(buf_len);
+    int buf_len = src.size() + 1;
+    reserve_discard(buf_len);
     memcpy(m_data, src.data(), (size_t)buf_len);
     m_owned = 1;
     m_size = src.size();
@@ -209,16 +210,7 @@ inline void Str::set_ref(std::string_view s)
         STR_MEMFREE(m_data);
     m_data = const_cast<char*>(s.data());
     m_size = s.size();
-    m_capacity = 0;
-    m_owned = 0;
-}
-
-Str::Str()
-{
-    m_data = EmptyBuffer;      // Shared READ-ONLY initial buffer for 0 capacity
-    m_capacity = 0;
-    m_local_size = 0;
-    m_size = 0;
+    m_capacity = s.size();
     m_owned = 0;
 }
 
@@ -307,13 +299,8 @@ void    Str::reserve(int new_capacity)
         new_data = (char*)STR_MEMALLOC(new_capacity);
     }
 
-    // string in m_data might be longer than new_capacity if it wasn't owned, don't copy too much
-#ifdef _MSC_VER
-    strncpy_s(new_data, (size_t)new_capacity, m_data, (size_t)new_capacity - 1);
-#else
-    strncpy(new_data, m_data, (size_t)new_capacity - 1);
-#endif
-    new_data[new_capacity - 1] = 0;
+    memcpy(new_data, m_data, m_size);
+    new_data[m_size] = 0;
 
     if (m_owned && !is_using_local_buf())
         STR_MEMFREE(m_data);
@@ -326,7 +313,7 @@ void    Str::reserve(int new_capacity)
 // Reserve memory, discarding the current of the buffer (if we expect to be fully rewritten)
 void    Str::reserve_discard(int new_capacity)
 {
-    if (new_capacity <= m_capacity)
+    if (m_owned && new_capacity <= m_capacity)
         return;
 
     if (m_owned && !is_using_local_buf())
@@ -341,7 +328,7 @@ void    Str::reserve_discard(int new_capacity)
     else
     {
         // Disowned or LocalBuf -> Heap
-        m_data = (char*)STR_MEMALLOC((size_t)new_capacity * sizeof(char));
+        m_data = (char*)STR_MEMALLOC((size_t)new_capacity);
         m_capacity = new_capacity;
     }
     m_owned = 1;
@@ -351,11 +338,11 @@ void    Str::shrink_to_fit()
 {
     if (!m_owned || is_using_local_buf())
         return;
-    int new_capacity = size() + 1;
+    int new_capacity = m_size + 1;
     if (m_capacity <= new_capacity)
         return;
 
-    char* new_data = (char*)STR_MEMALLOC((size_t)new_capacity * sizeof(char));
+    char* new_data = (char*)STR_MEMALLOC((size_t)new_capacity);
     memcpy(new_data, m_data, (size_t)new_capacity);
     STR_MEMFREE(m_data);
     m_data = new_data;
@@ -377,22 +364,13 @@ int     Str::setf(fmt::format_string<Args...> fm, Args&&... args)
 template<typename... Args>
 int     Str::setf_nogrow(fmt::format_string<Args...> fm, Args&&... args)
 {
-    STR_ASSERT(m_owned);
     int len = fmt::formatted_size(fm, std::forward<Args>(args)...);
-    auto res = fmt::format_to_n(m_data, m_capacity, fm, std::forward<Args>(args)...);
+    if (m_capacity < len + 1)
+        reserve_discard(len + 1);
+    STR_ASSERT(m_owned);
+    fmt::format_to_n(m_data, m_capacity, fm, std::forward<Args>(args)...);
 
-    assert(0);
-    return -1;
-    // return len;
-    // STR_ASSERT(m_owned);
-
-    // if (m_capacity == 0)
-    //     return 0;
-
-    // int w = vsnprintf(m_data, (size_t)m_capacity, fmt, args);
-    // m_data[m_capacity - 1] = 0;
-    // m_owned = 1;
-    // return (w == -1) ? m_capacity - 1 : w;
+    return len;
 }
 
 int     Str::append(std::string_view s)
@@ -406,9 +384,9 @@ int     Str::append(std::string_view s)
 
 int     Str::append_nogrow(std::string_view s)
 {
-    int to_copy = std::min((int)s.size(), std::max(0, m_capacity - m_size - 1));
-    if (to_copy == 0 && s.size() != 0)
+    if (m_capacity < m_size + s.size() + 1)
         return -1;
+    int to_copy = std::min((int)s.size(), std::max(0, m_capacity - m_size - 1));
     strncpy(m_data + m_size, s.data(), to_copy);
     m_size += to_copy;
     m_data[m_size] = 0;
@@ -419,7 +397,6 @@ template<typename... Args>
 int     Str::appendf(fmt::format_string<Args...> fm, Args&&... args)
 {
     int len = fmt::formatted_size(fm, std::forward<Args>(args)...);
-    printf("len=%d\n", len);
     if (m_capacity < len + 1)
         reserve(len + 1);
     STR_ASSERT(m_owned);
@@ -442,5 +419,3 @@ int     Str::appendf_nogrow(fmt::format_string<Args...> fm, Args&&... args)
     m_data[m_size] = 0;
     return len;
 }
-
-#endif // #ifndef STR_INCLUDED
