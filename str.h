@@ -238,7 +238,9 @@ private:
 public:
     StrN() : Str(LOCALBUFFSIZE) {}
     StrN(std::string_view s) : Str(LOCALBUFFSIZE) { set(s); }
+    StrN(const char* s) : Str(LOCALBUFFSIZE) { set(s); }
     StrN& operator=(std::string_view s) { set(s); return *this; }
+    StrN& operator=(const char* s) { set(s); return *this; }
 };
 
 // Disable PVS-Studio warning V730: Not all members of a class are initialized inside the constructor (local_buf is not initialized and that is fine)
@@ -260,14 +262,9 @@ using Str256 = StrN<256>;
 #pragma clang diagnostic pop
 #endif
 
-#endif // #ifndef STR_INCLUDED
-
 //-------------------------------------------------------------------------
 // IMPLEMENTATION
 //-------------------------------------------------------------------------
-
-#ifdef STR_IMPLEMENTATION
-
 
 // Static empty buffer we can point to for empty strings
 // Pointing to a literal increases the like-hood of getting a crash if someone attempts to write in the empty string buffer.
@@ -446,19 +443,4 @@ int     Str::appendf_nogrow(fmt::format_string<Args...> fm, Args&&... args)
     return len;
 }
 
-#endif // #define STR_IMPLEMENTATION
-
-//-------------------------------------------------------------------------
-
-
-#if 0
-using namespace std::literals;
-#include <stdio.h>
-
-int main() {
-    Str128 a = "foobar"sv;
-    printf("%d %d %d %s\n", a.size(), a.capacity(), a.owned(), a.c_str());
-    a.appendf("{2}{1}{0}", 1, 2, 3);
-    printf("%d %s\n", a.size(), a.c_str());
-}
-#endif
+#endif // #ifndef STR_INCLUDED
