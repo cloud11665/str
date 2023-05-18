@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <assert.h>
-#include "str.h"
+#include "str.hpp"
 using namespace std::literals;
 
 void test_pointer()
